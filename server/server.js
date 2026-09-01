@@ -13,6 +13,10 @@ const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
+// Behind Vercel/Render/etc. there is exactly one proxy in front of the app.
+// Trust it so express-rate-limit and req.ip see the real client IP.
+app.set('trust proxy', 1);
+
 // --- Security & parsing middleware ---
 app.use(helmet());
 app.use(express.json({ limit: '2mb' }));
