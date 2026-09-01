@@ -25,12 +25,16 @@ app.use(mongoSanitize()); // strips $/. operators from req.body/query/params
 
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
   .split(',')
-  .map((o) => o.trim());
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (!origin) return callback(null, true); // curl / server-to-server
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Any Vercel deployment/preview URL for this app is fine.
+      if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return callback(null, true);
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
@@ -55,6 +59,18 @@ app.use(
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get('/api/health', (req, res) => res.json({ success: true, data: { status: 'ok' } }));
+
+// Ensure the DB is connected before any real API route runs. On serverless the
+// connection is cached, so this is a no-op after the first request.
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.use('/api', apiRoutes);
 
 app.use(notFound);
@@ -63,12 +79,13 @@ app.use(errorHandler);
 // Only listen when run directly (node server.js). When imported by the
 // Vercel serverless handler (api/index.js) we just export `app`.
 if (require.main === module) {
-  connectDB().then(() => {
-    const port = process.env.PORT || 5000;
-    app.listen(port, () => console.log(`API listening on port ${port}`));
-  });
-} else {
-  connectDB();
+  const port = process.env.PORT || 5000;
+  connectDB()
+    .then(() => app.listen(port, () => console.log(`API listening on port ${port}`)))
+    .catch((err) => {
+      console.error(err.message);
+      process.exit(1);
+    });
 }
 
 module.exports = app;
